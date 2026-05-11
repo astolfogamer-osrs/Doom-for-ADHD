@@ -1,0 +1,31 @@
+plugins {
+	id 'java'
+}
+
+group 'com.rodolfo'
+version '1.0-SNAPSHOT'
+
+repositories {
+	mavenCentral()
+	maven {
+		url "https://repo.runelite.net/repository/maven-public/"
+	}
+	maven {
+		url "https://repo.runelite.net/repository/maven-snapshots/"
+	}
+}
+
+// Esta é a parte que estava dando erro. Verifique se está exatamente assim:
+dependencies {
+	compileOnly 'net.runelite:client:1.10.33'
+
+	compileOnly 'org.projectlombok:lombok:1.18.30'
+	annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+	testImplementation 'junit:junit:4.13.2'
+	testImplementation 'net.runelite:client:1.10.33'
+}
+
+tasks.withType(JavaCompile) {
+	options.encoding = 'UTF-8'
+}
