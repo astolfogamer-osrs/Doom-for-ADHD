@@ -3,29 +3,27 @@ package net.runelite.client.plugins.doomhelper;
 import com.google.inject.Provides;
 import java.io.BufferedInputStream;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
 import javax.inject.Inject;
-import javax.sound.sampled.*;
-import lombok.Getter;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.FloatControl;
+import javax.sound.sampled.LineEvent;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
-import net.runelite.api.NPC;
 import net.runelite.api.Projectile;
-import net.runelite.api.events.GameTick;
-import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.ProjectileMoved;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.ui.overlay.OverlayManager;
 
 @Slf4j
 @PluginDescriptor(
-        name = "[AG] Doom Helper",
-        description = "Sons para Projéteis e Timer para Volatile Earth",
-        tags = {"doom", "pvm", "helper"}
+        name = "Doom Helper Audio",
+        description = "Alertas sonoros para projéteis de Mage e Range",
+        tags = {"doom", "pvm", "audio", "helper"}
 )
 public class DoomHelperPlugin extends Plugin
 {
@@ -36,29 +34,21 @@ public class DoomHelperPlugin extends Plugin
     private DoomHelperConfig config;
 
     @Inject
-    private OverlayManager overlayManager;
-
-    @Inject
-    private DoomHelperOverlay overlay;
-
-    @Getter
-    private final List<VolatileEarth> activeEarths = new ArrayList<>();
+    private ScheduledExecutorService executor;
 
     private static final int MAGE_PROJECTILE_ID   = 3385;
     private static final int RANGED_PROJECTILE_ID = 3384;
-    private static final int VOLATILE_EARTH_ID    = 14714; // Verifique este ID no jogo
 
     private int lastProjectileTick = -1;
 
     @Override
     protected void startUp() {
-        overlayManager.add(overlay);
+
     }
 
     @Override
     protected void shutDown() {
-        overlayManager.remove(overlay);
-        activeEarths.clear();
+
     }
 
     @Subscribe
@@ -79,52 +69,34 @@ public class DoomHelperPlugin extends Plugin
         }
     }
 
-    @Subscribe
-    public void onNpcSpawned(NpcSpawned event) {
-        NPC npc = event.getNpc();
-        // Detecta pelo ID ou pelo Nome se o ID mudar
-        if (npc.getId() == VOLATILE_EARTH_ID || (npc.getName() != null && npc.getName().contains("Volatile Earth"))) {
-            activeEarths.add(new VolatileEarth(npc, 20));
-        }
-    }
-
-    @Subscribe
-    public void onGameTick(GameTick event) {
-        activeEarths.removeIf(earth -> {
-            earth.setTicksLeft(earth.getTicksLeft() - 1);
-            return earth.getTicksLeft() <= 0 || earth.getNpc().isDead();
-        });
-    }
-
     private void playSound(String fileName) {
-        new Thread(() -> {
+        executor.submit(() -> {
             try {
-                // CAMINHO RESTAURADO PARA O SEU PACKAGE
                 String path = "/net/runelite/client/plugins/doomhelper/" + fileName;
                 InputStream is = getClass().getResourceAsStream(path);
 
-                if (is == null) {
-                    log.error("Arquivo de som nao encontrado: " + path);
-                    return;
+                if (is == null) return;
+
+                try (AudioInputStream audioStream = AudioSystem.getAudioInputStream(new BufferedInputStream(is))) {
+                    Clip clip = AudioSystem.getClip();
+                    clip.open(audioStream);
+
+                    if (clip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+                        FloatControl gain = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+                        gain.setValue(volumeToDb(config.volume()));
+                    }
+
+                    clip.start();
+                    clip.addLineListener(e -> {
+                        if (e.getType() == LineEvent.Type.STOP) {
+                            clip.close();
+                        }
+                    });
                 }
-
-                AudioInputStream audioStream = AudioSystem.getAudioInputStream(new BufferedInputStream(is));
-                Clip clip = AudioSystem.getClip();
-                clip.open(audioStream);
-
-                if (clip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
-                    FloatControl gain = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
-                    gain.setValue(volumeToDb(config.volume()));
-                }
-
-                clip.start();
-                clip.addLineListener(e -> {
-                    if (e.getType() == LineEvent.Type.STOP) clip.close();
-                });
             } catch (Exception e) {
-                log.warn("Erro ao tocar som: " + fileName, e);
+                log.warn("Erro ao tocar som: " + fileName);
             }
-        }).start();
+        });
     }
 
     private float volumeToDb(int volumePercent) {
